@@ -1,0 +1,19 @@
+{
+  "name": "json-markov",
+  "version": "1.0.0",
+  "description": "Module for generating easily saveable and human readable markov chains in JSON format for text generation",
+  "main": "./src/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aapedro/json-markov.git"
+  },
+  "author": "aapedro",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/aapedro/json-markov/issues"
+  },
+  "homepage": "https://github.com/aapedro/json-markov#readme"
+}
