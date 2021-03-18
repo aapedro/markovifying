@@ -1,133 +1,178 @@
-function updateProbabilitiesInBranch(branch, newPossibility) {
-    // Total possibilities before the new one
-    const oldTotal = branch[0] - 1
-    // If it's a new possibility, initialize it with a 0% chance
-    if (!branch[1][newPossibility]) branch[1][newPossibility] = 0
-    // Iterate through the possibilities to update their probabilities
-    for (possibility in branch[1]) {
-        // If it's the new one, add one to the total and calculate the new probability
-        if (possibility === newPossibility) {
-            const newAmmount = branch[1][possibility] * oldTotal + 1
-            branch[1][possibility] = newAmmount / branch[0]
-            // Otherwise calculate the ammount based on the possibility and then update it
-        } else {
-            const ammount = branch[1][possibility] * oldTotal
-            branch[1][possibility] = ammount / branch[0]
-        }
-    }
-    // Return the branch with the updated possibilities
-    return branch
-}
-
-
-function getRandomOptionFromBranch(branch) {
-    const rnd = Math.random()
-    let cumulative = 0
-    // Iterate through the probabilities 
-    for (possibility of Object.entries(branch[1])) {
-        const prob = possibility[1]
-        if (rnd >= cumulative && rnd < cumulative + prob) {
-            return possibility[0]
-        } else {
-            cumulative += prob
-        }
-    }
-}
-
-function getRandomItemFromArray(array) {
-    const randomIndex = Math.floor(Math.random() * array.length)
-    return array[randomIndex]
-}
-
 const markov = {
     /**
-     * Generates a markov chain tree based on an array of text.
-     * @param {array} phrases - The phrases to be processed
+     * Generates a markov chain model object based on an array of text.
+     * @param {array} corpus - An array of strings (sentences) that will be used to generate the text
      * @param {object} options - Options
      */
-    generateChain: (phrases = [], chainOptions = {}) => {
-        const options = {
-            limitStartingWords: true,
-            ...chainOptions
+    generateModel: (corpus = [], options = {}) => {
+        // Default options
+        const modelOptions = {
+            // Whether or not to consider case when building the model
+            isCaseSensitive: false, //TODO
+            // How many words on each state
+            stateSize: 2,
+            ...options
         }
-        //Initialize the chain and add the starting positions array if necessary
-        const markovChain = { tree: {} }
-        if (options.limitStartingWords) markovChain.startsBranch = [0, {}]
 
-        phrases.forEach(phrase => {
-            // Apply toLowerCase
-            phrase = phrase.toLowerCase()
-            // Match the words and if necessary the punctuation
-            if (!phrase.match(/([\wçüéâäàêëèïîìôòõûùÿáíóúãýßöøæåñ]+['-]*[\wçüéâäàêëèïîìôõòûùÿáíóúãýßöøæåñ]*)|([,.!?])/g)) return
-            const textArray = phrase.match(/([\wçüéâäàêëèïîìôòõûùÿáíóúãýßöøæåñ]+['-]*[\wçüéâäàêëèïîìôòõûùÿáíóúãýßöøæåñ]*)|([,.!?])/g)
-            textArray.forEach((word, index) => {
-                // If the current word or the next word is blank, skip
-                if (!word || !textArray[index + 1]) return
+        // Check for valid option parameters
+        if (
+            typeof modelOptions.isCaseSensitive !== "boolean" ||
+            (Number.isInteger(modelOptions.stateSize) && modelOptions.stateSize > 0) !== true) {
+            throw new Error("Invalid options.")
+        }
 
-                const nextWord = textArray[index + 1]
-                const wordPair = word + " " + nextWord
+        // Generate the pre compiled model
+        const precompiledModel = markov.generatePrecompiledModel(corpus, modelOptions)
 
-                if (options.limitStartingWords && !markovChain.startsBranch[1][wordPair] && index === 0) {
-                    markovChain.startsBranch[0] += 1
-                    markovChain.startsBranch = updateProbabilitiesInBranch(markovChain.startsBranch, wordPair)
-                }
+        // Compile the model
+        const compiledModel = markov.compileModel(precompiledModel)
 
-                // Initialize the branch if it's a new possibility
-                if (!markovChain.tree[wordPair]) {
-                    // 0 -> number of continuations calculated
-                    // {} -> continuations and their probabilities
-                    markovChain.tree[wordPair] = [0, {}]
-                }
-
-                // Checks the word after current pair,
-                // if it's the end of the phrase set it to "[end]" as a placeholder
-                const nextNextWord = textArray[index + 2] ? textArray[index + 2] : "[end]"
-
-                // Increase the total number of continuations in the branch
-                markovChain.tree[wordPair][0] += 1
-                // Update the branch
-                markovChain.tree[wordPair] = updateProbabilitiesInBranch(markovChain.tree[wordPair], nextNextWord)
-            })
-
-        })
-        // Return the chain
-        return markovChain
+        // Return the compiled model
+        return compiledModel
     },
     /**
-     * Generates a phrase from the selected chain
-     * @param {*} chain - The markov chain object
+     * Generates a precompiled model based on an array of sentences
+     * @param {array} sentences - The sentences to be used in the model generation
+     * @returns 
      */
-    generatePhraseFromChain: (chain) => {
-        // Initialize the phrase
-        let phraseArray = []
-        // If the chain supports it, start from one of the starting positions
-        if (chain.startsBranch) {
-            phraseArray = getRandomOptionFromBranch(chain.startsBranch).split(' ')
-        // Otherwise start from a random one
-        } else {
-            phraseArray = getRandomItemFromArray(Object.keys(chain.tree)).split(' ')
+    generatePrecompiledModel: (sentences, modelOptions) => {
+        const precompiledModel = { starts: [], states: {} }
+        sentences.forEach(sentence => {
+            // Check for valid input
+            if (typeof sentence !== "string") throw new Error("Invalid item in corpus.")
+
+            // Apply lowercase if it's necessary
+            if (!modelOptions.isCaseSensitive) sentence = sentence.toLowerCase()
+
+            // Process the sentence
+            const textArray = markov.processSentence(sentence)
+
+            // Return if the array isn't long enough
+            if (textArray.length < modelOptions.stateSize) return
+
+            // Loop over the text array
+            for (let i = 0; i < textArray.length; i++) {
+
+                // Generate the current state based on the state size
+                // .fill("") is there because .map() doesn't work on arrays generated by
+                // the constructor, as their indexes are empty (not underfined or null, just empty)
+                // lol
+                let currentState = new Array(modelOptions.stateSize).fill("").reduce((acc, curr, index) => {
+                    // Replace each element with it's respective word in the sentence,
+                    // or stop if the sentence ends
+                    return textArray[index + i] ? acc.concat([textArray[index + i]]) : acc
+                }, [])
+
+                // If current state is smaller than the state size, return
+                if (currentState.length < modelOptions.stateSize) return
+
+                // Convert the state into string
+                currentState = currentState.join(" ")
+
+                // If necessary add state to possible starts
+                if (i === 0 && !precompiledModel.starts.includes(currentState)) {
+                    precompiledModel.starts.push(currentState)
+                }
+
+                // Add the state to the chain if it's new
+                if (!precompiledModel.states[currentState]) {
+                    // 0 -> Number of continuations processed
+                    // {} -> Continuations and their totals
+                    precompiledModel.states[currentState] = [0, {}]
+                }
+
+                // Increase the number of continuations of the state
+                precompiledModel.states[currentState][0] += 1
+
+                // Check the continuation to the current state
+                const continuation = textArray[modelOptions.stateSize + i] ? textArray[modelOptions.stateSize + i] : "<!END>"
+                if (!precompiledModel.states[currentState][1][continuation]) {
+                    precompiledModel.states[currentState][1][continuation] = 0
+                }
+                precompiledModel.states[currentState][1][continuation] += 1
+            }
+
+        })
+        return precompiledModel
+    },
+    /**
+     * Processes a sentence in order for it to be usable in model generation
+     * @param {string} sentence - The sentence to be processed
+     * @returns 
+     */
+    processSentence: (sentence) => {
+        //TODO: make markov more customizable
+        // First, pad out punctuation
+        sentence = sentence.replace(/\.\.\.|[!?.,;:¿¡]/g, match => " ")
+
+        return sentence.split(" ")
+    },
+    /**
+     * Compiles a model, converting it from total occurences to percentage chances
+     * @param {object} model - The model to be compiled 
+     */
+    compileModel: (model) => {
+        for (state in model.states) {
+            model.states[state] = markov.generatePercentages(model.states[state])
         }
+        return model
+    },
+    /**
+     * Calculates the percentages for a given state
+     * @param {*} state - The state to be processed
+     */
+    generatePercentages: (state) => {
+        const total = state[0]
+        Object.entries(state[1]).forEach(s => {
+            state[1][s[0]] = s[1] / total
+        })
+        return state
+    },
+    /**
+     * Generates a phrase from the markov chain model object
+     * @param {object} model - The model object
+     */
+    generateTextFromModel: (model) => {
+        // Start out the generated phrase with one of the starting options
+        const phraseArray = model.starts[Math.floor(Math.random() * model.starts.length)].split(' ')
+        const stateSize = phraseArray.length
+
         while (true) {
-            // Look in the branch formed by the last two words of the phrase
-            const currentBranch = `${phraseArray[phraseArray.length - 2]} ${phraseArray[phraseArray.length - 1]}`
+            // Check the state the state formed by the last stateSize words of the phrase
+            const currentState = phraseArray.reduce((acc, curr, index) => {
+                if (phraseArray.length - index <= stateSize) {
+                    const newAcc = [...acc, curr]
+                    return newAcc
+                }
+                return acc
+            }, []).join(' ')
             // If there are none, end the phrase
-            if (!chain.tree[currentBranch]) {
-                phraseArray.push('.')
+            if (!model.states[currentState]) {
                 break
             }
-            // Otherwise, randomly select the next work using the probabilities in the branch
-            const nextWord = getRandomOptionFromBranch(chain.tree[currentBranch])
+            // Otherwise, randomly select the next word using the probabilities in the branch
+            const nextWord = markov.getRandomOptionFromState(model.states[currentState])
             // If it's the ending tag, end the phrase
-            if (nextWord === "[end]") {
-                phraseArray.push('.')
-                break
-            }
+            if (nextWord === "<!END>") break
             // Otherwise add the word to the phrase
             phraseArray.push(nextWord)
         }
         // Return the phrase with proper punctuation formatting
-        const phrase = phraseArray.join(' ').replace(/ +, +/g, ', ').replace(/ +\. */g, '. ')
-        return phrase.charAt(0).toUpperCase() + phrase.slice(1)
+        const phrase = phraseArray.join(' ')
+        return phrase
+    },
+    getRandomOptionFromState: (state) => {
+        const rnd = Math.random()
+        let cumulative = 0
+        // Iterate through the probabilities 
+        for (possibility of Object.entries(state[1])) {
+            const prob = possibility[1]
+            if (rnd >= cumulative && rnd < cumulative + prob) {
+                return possibility[0]
+            } else {
+                cumulative += prob
+            }
+        }
     }
 }
 
