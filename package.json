@@ -1,6 +1,6 @@
 {
   "name": "markovifying",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Module for generating easily saveable and human readable markov chains in JSON format for text generation",
   "main": "./src/index.js",
   "scripts": {

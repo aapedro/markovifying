@@ -31,23 +31,9 @@ const markov = {
             throw new Error("Invalid options.")
         }
 
-        // Generate the pre compiled model
-        const precompiledModel = markov.generatePrecompiledModel(corpus, modelOptions)
+        const model = { starts: [0, {}], states: {} }
 
-        // Compile the model
-        const compiledModel = markov.compileModel(precompiledModel)
-
-        // Return the compiled model
-        return compiledModel
-    },
-    /**
-     * Generates a precompiled model based on an array of sentences
-     * @param {array} sentences - The sentences to be used in the model generation
-     * @returns 
-     */
-    generatePrecompiledModel: (sentences, modelOptions) => {
-        const precompiledModel = { starts: [], states: {} }
-        sentences.forEach(sentence => {
+        corpus.forEach(sentence => {
             // Check for valid input
             if (typeof sentence !== "string") throw new Error("Invalid item in corpus.")
 
@@ -74,36 +60,42 @@ const markov = {
                 }, [])
 
                 // If current state is smaller than the state size, return
-                if (currentState.length < modelOptions.stateSize) return
+                if (currentStateArr.length < modelOptions.stateSize) return
 
                 // Convert the state into string
                 const currentState = currentStateArr.join(" ")
 
                 // If necessary add state to possible starts
-                if (i === 0 && !precompiledModel.starts.includes(currentState)) {
-                    precompiledModel.starts.push(currentState)
+                if (i === 0) {
+                    if (!model.starts[1][currentState]) {
+                        model.starts[1][currentState] = 0
+                    }
+                    model.starts[0] += 1
+                    model.starts[1][currentState] += 1
                 }
 
                 // Add the state to the chain if it's new
-                if (!precompiledModel.states[currentState]) {
+                if (!model.states[currentState]) {
                     // 0 -> Number of continuations processed
                     // {} -> Continuations and their totals
-                    precompiledModel.states[currentState] = [0, {}]
+                    model.states[currentState] = [0, {}]
                 }
 
                 // Increase the number of continuations of the state
-                precompiledModel.states[currentState][0] += 1
+                model.states[currentState][0] += 1
 
                 // Check the continuation to the current state
-                const continuation = textArray[modelOptions.stateSize + i] ? textArray[modelOptions.stateSize + i] : "<!END>"
-                if (!precompiledModel.states[currentState][1][continuation]) {
-                    precompiledModel.states[currentState][1][continuation] = 0
+                const continuation = textArray[modelOptions.stateSize + i] ? textArray[modelOptions.stateSize + i] : ""
+                if (!model.states[currentState][1][continuation]) {
+                    model.states[currentState][1][continuation] = 0
                 }
-                precompiledModel.states[currentState][1][continuation] += 1
+                model.states[currentState][1][continuation] += 1
             }
 
         })
-        return precompiledModel
+
+        // Return the model
+        return model
     },
     /**
      * Processes a sentence in order for it to be usable in model generation
@@ -112,30 +104,26 @@ const markov = {
      */
     processSentence: (sentence, regex) => {
         // Remove the regex
-        sentence = sentence.replace(regex," ").replace(/\s{2,}/g," ")
+        sentence = sentence.replace(regex, " ").replace(/\s{2,}/g, " ")
 
         return sentence.split(" ")
     },
     /**
-     * Compiles a model, converting it from total occurences to percentage chances
-     * @param {object} model - The model to be compiled 
+     * Gets a random option from the state, using the weighted values.
+     * @param {object} state - The state to use
      */
-    compileModel: (model) => {
-        for (state in model.states) {
-            model.states[state] = markov.generatePercentages(model.states[state])
+    getRandomOptionFromState: (state) => {
+        const rnd = Math.floor(Math.random() * state[0])
+        let cumulative = 0
+        // Iterate through the probabilities 
+        for (possibility of Object.entries(state[1])) {
+            const prob = possibility[1]
+            if (rnd >= cumulative && rnd < cumulative + prob) {
+                return possibility[0]
+            } else {
+                cumulative += prob
+            }
         }
-        return model
-    },
-    /**
-     * Calculates the percentages for a given state
-     * @param {*} state - The state to be processed
-     */
-    generatePercentages: (state) => {
-        const total = state[0]
-        Object.entries(state[1]).forEach(s => {
-            state[1][s[0]] = s[1] / total
-        })
-        return state
     },
     /**
      * Generates a phrase from the markov chain model object
@@ -143,11 +131,11 @@ const markov = {
      */
     generateTextFromModel: (model) => {
         // Start out the generated phrase with one of the starting options
-        const phraseArray = model.starts[Math.floor(Math.random() * model.starts.length)].split(' ')
+        const phraseArray = markov.getRandomOptionFromState(model.starts).split(' ')
         const stateSize = phraseArray.length
 
         while (true) {
-            // Check the state the state formed by the last stateSize words of the phrase
+            // Check the state formed by the last stateSize words of the phrase
             const currentState = phraseArray.reduce((acc, curr, index) => {
                 if (phraseArray.length - index <= stateSize) {
                     const newAcc = [...acc, curr]
@@ -159,29 +147,70 @@ const markov = {
             if (!model.states[currentState]) {
                 break
             }
-            // Otherwise, randomly select the next word using the probabilities in the branch
+            // Otherwise, randomly select the next word using the weights in the branch
             const nextWord = markov.getRandomOptionFromState(model.states[currentState])
-            // If it's the ending tag, end the phrase
-            if (nextWord === "<!END>") break
+            // If it's an empty string, end the phrase
+            if (!nextWord) break
             // Otherwise add the word to the phrase
             phraseArray.push(nextWord)
         }
-        // Return the phrase with proper punctuation formatting
+        // Return the phrase with proper formatting
         const phrase = phraseArray.join(' ')
         return phrase
     },
-    getRandomOptionFromState: (state) => {
-        const rnd = Math.random()
-        let cumulative = 0
-        // Iterate through the probabilities 
-        for (possibility of Object.entries(state[1])) {
-            const prob = possibility[1]
-            if (rnd >= cumulative && rnd < cumulative + prob) {
-                return possibility[0]
-            } else {
-                cumulative += prob
+    /**
+     * Merges 2 models together
+     * @param {object} modelA - First model
+     * @param {object} modelB - Second model
+     */
+    mergeModels(modelA, modelB) {
+        // {
+        //     starts: [num, {words:num}]
+        //     states: {words: [num, {word:num}]}
+        // }
+
+        const newModel = { starts: [0, {}], states: {} }
+        // First, merge the starts
+        newModel.starts[0] = modelA.starts[0] + modelB.starts[0]
+        const startsList = Object.entries(modelA.starts[1]).concat(Object.entries(modelB.starts[1]))
+        // [words, num]
+        startsList.forEach(s => {
+            if (!newModel.starts[1][s[0]]) {
+                newModel.starts[1][s[0]] = 0
             }
-        }
+            newModel.starts[1][s[0]] += s[1]
+        })
+        // Then the states
+        const stateList = Object.entries(modelA.states).concat(Object.entries(modelB.states))
+        // [words, [num, {word:num}]]
+        stateList.forEach(s => {
+            const stateName = s[0]
+            const state = s[1]
+            if (!newModel.states[stateName]) {
+                newModel.states[stateName] = [0, {}]
+            }
+            newModel.states[stateName][0] += state[0]
+            for (const word in state[1]) {
+                if (!newModel.states[stateName][1][word]) {
+                    newModel.states[stateName][1][word] = 0
+                }
+                newModel.states[stateName][1][word] += state[1][word]
+            }
+        })
+
+        return newModel
+    },
+    /**
+     * Updates an existing model
+     * @param {object} model - The model to be updated
+     * @param {array} corpus - The new corpus
+     */
+    updateModel(model, corpus) {
+        // First, create new model from new corpus
+        const newModel = markov.generateModel(corpus)
+
+        // Then merge the 2 models together
+        return markov.mergeModels(model, newModel)
     }
 }
 
