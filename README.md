@@ -1,5 +1,5 @@
 # Markovifying
-Markovifying is a JavaScript module with for generating easily saveable and human readable markov chain models for predictive text generation.
+Markovifying is a JavaScript module with for generating markov chain models for predictive text generation in JSON format.
 
 ## Features
 
@@ -10,7 +10,6 @@ Markovifying is a JavaScript module with for generating easily saveable and huma
 ```
 npm install markovifying
 ```
-Browser versions are available in the releases tab.
 
 ## Usage
 ```js
